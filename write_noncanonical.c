@@ -11,6 +11,8 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "alarm.h"
+
 // Baudrate settings are defined in <asm/termbits.h>, which is
 // included by <termios.h>
 #define BAUDRATE B38400
@@ -19,7 +21,8 @@
 #define FALSE 0
 #define TRUE 1
 
-#define BUF_SIZE 5
+#define BUF_SIZE 1
+
 
 volatile int STOP = FALSE;
 
@@ -110,18 +113,65 @@ int main(int argc, char *argv[])
 
     // Create string to send
     unsigned char buf[BUF_SIZE] = {0};
-    buf[0]=0x7E;
-    buf[1]=0x03;
-    buf[2]=0x03;
-    buf[3]=buf[1]^buf[2];
-    buf[4]=buf[0];
+    int bytes;
+    
+    unsigned char buf2[5] = {0};
+    buf2[0]=0x7E;//FLAG
+    buf2[1]=0x03;//a
+    buf2[2]=0x03;//C
+    buf2[3]=buf[1]^buf[2];
+    buf2[4]=buf[0];
 
-    int bytes = write(fd, buf, BUF_SIZE);
-    printf("%d bytes written\n", bytes);
-    bytes = read(fd, buf, BUF_SIZE);
-    for (int i = 0; i<BUF_SIZE; i++){
-        printf(":0x%02X:%d\n", buf[i]);
+// envia o set
+  /*  for(int i=0;i<5;i++){
+    buf[0]=buf2[i];
+    bytes=write(fd, buf, BUF_SIZE);
+    printf("%x byte enviado\n", buf[0]);
+    }*/
+
+//ler ua
+unsigned char ua[BUF_SIZE]={0};
+bytes=read(fd,ua,BUF_SIZE);
+printf("UA=%x\n",ua[0]);
+
+
+//máquina estados para o alarme
+int state=0;
+while(state !=2){
+
+
+switch(state):
+case 0:
+   for(int i=0;i<5;i++){
+    buf[0]=buf2[i];
+    bytes=write(fd, buf, BUF_SIZE);
+    printf("%x byte enviado\n", buf[0]);
     }
+state=1;
+break;
+
+case 1:
+//espera pelo ua, ou pelo cnt_alarme >3(vai para o 2), ou que passem 3 segundos(vai para o 0)
+if((buf[0]==0x03) ||  alarmCount>3  ){state=2;}
+else if(alarmEnabled){state=0;}
+break;
+
+
+
+case 2:
+//novo set aqui?
+break;
+}
+
+
+
+
+  
+ /*   bytes = read(fd, buf, BUF_SIZE);
+    for (int i = 0; i<BUF_SIZE; i++){
+        printf(":0x%x\n", buf[i]);
+    }*/
+
 
     // Wait until all bytes have been written to the serial port
     sleep(1);
@@ -137,3 +187,4 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+
