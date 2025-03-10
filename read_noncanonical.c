@@ -42,7 +42,7 @@ typedef enum State_Struct{
     stop,
 
 }State;// Passei a variavel state para 1 inteiro estava a dar erros com a enumeraçao e n sei fazer por esse metodo
-//int state;
+//int state;read_noncanonical
 
 State state=START;
 
@@ -92,16 +92,13 @@ int main(int argc, char *argv[])
 
     // Set input mode (non-canonical, no echo,...)
     newtio.c_lflag = 0;
-    newtio.c_cc[VTIME] = 0; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 5;  // Blocking read until 5 chars received
-
-    // VTIME e VMIN should be changed in order to protect with a
+    newtio.c_cc[VTIME] = 0; // Inter-c 0x03in order to protect with a
     // timeout the reception of the following character(s)
 
     // Now clean the line and activate the settings for the port
     // tcflush() discards data written to the object referred to
     // by fd but not transmitted, or data received but not read,
-    // depending on the value of queue_selector:
+    // depending on the value of queue_ 0x03elector:
     //   TCIFLUSH - flushes data received but not read.
     tcflush(fd, TCIOFLUSH);
 
@@ -111,7 +108,7 @@ int main(int argc, char *argv[])
         perror("tcsetattr");
         exit(-1);
     }
-
+ 0x03
     printf("New termios structure set\n");
 
     // Loop for input
@@ -134,24 +131,23 @@ int main(int argc, char *argv[])
 
    while(state != BCC_OK){
     bytes = read(fd, buf, BUF_SIZE);
-printf("buf0 é:%x \n",buf[0]);
+    printf("buf0 é:%x \n",buf[0]);
     switch (state){
 
     case START:  
     printf("start\n");
     if (buf[0] == FLAG){state = FLAG_RCV;}
-    else {state = START;}
-    break;
-
-
+    else {state = START;} 0x03
     case FLAG_RCV:
+    unsigned char buf1[1] = {A};
+    printf("numero de bytes enviados: %x\n", buf1[1]);// numero de bytes enviados no ua
+    write(fd, buf1, BUF_SIZE); 
     printf("flag_rcv\n");
     if (buf[0] == A){state = A_RCV;}
     else if (buf[0] == FLAG){state  = FLAG_RCV;}
     else {state = START;}
     break;
-
-
+ 0x03
     case A_RCV:
     printf("A_RCV\n");
     if (buf[0] == C){state = C_RCV;}
@@ -189,13 +185,7 @@ printf("buf0 é:%x \n",buf[0]);
     /*
     switch (state){
     case 0:
-    if (FLAG_RCV)   state = FLAG_RCV;
-
-    case 1:
-    if (Other_RCV)  state = 0;
-    if (A_RCV) s   tate = 2;
-
-    case 2:
+    if (FLAG_RCV)   state = FLAG_RCV; 0x03
     if(C_RCV) state=3;
     if(Other_RCV) state=0;
     if(FLAG_RCV) state=1;
@@ -206,13 +196,7 @@ printf("buf0 é:%x \n",buf[0]);
     if(Other_RCV) state=0;
     if(FLAG_RCV) state=1;
 
-
-    case 4:
-    printf()
-    if(FLAG_RCV) state=5;
-    if(Other_RCV) state=0;
-
-    case 5:
+ 0x03
     }*/
 
    /* buf[0]=0x7E;
@@ -220,13 +204,7 @@ printf("buf0 é:%x \n",buf[0]);
     buf[2]=0x07;
     buf[3]=buf[1]^buf[2];
     buf[4]=buf[0];*/
-
-    bytes = write(fd, buf, BUF_SIZE);
-    printf("%d bytes written\n", bytes);
-    
-
-    sleep(1);
-        
+ 0x03
 
     // The while() cycle should be changed in order to respect the specifications
     // of the protocol indicated in the Lab guide
@@ -242,3 +220,4 @@ printf("buf0 é:%x \n",buf[0]);
 
     return 0;
 }
+
