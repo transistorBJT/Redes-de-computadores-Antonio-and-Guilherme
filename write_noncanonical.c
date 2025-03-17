@@ -10,8 +10,10 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
+#include <signal.h>
 
-#include "alarm.h"
+struct termios oldtio;
+struct termios newtio;
 
 // Baudrate settings are defined in <asm/termbits.h>, which is
 // included by <termios.h>
@@ -19,15 +21,197 @@
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
 #define FALSE 0
-#define TRUE 1
+#define TRUE  1
 
-#define BUF_SIZE 1
+#define BUF_SIZE 256
 
+// SET buffer values
+#define FLAG        0x7E
+#define A           0x03
+#define C           0x03
+#define C_UA        0x07
+#define BCC         (A ^ C)
+
+#define START       0
+#define FLAG_RCV    1
+#define A_RCV       2
+#define C_RCV       3
+#define BCC_OK      4
+#define S_STOP      5
+
+int alarmEnabled = FALSE;
+int alarmCount = 0;
+
+// Alarm function handler
+void alarmHandler(int signal)
+{
+    alarmEnabled = FALSE;
+    alarmCount++;
+
+    printf("Alarm #%d\n", alarmCount);
+}
 
 volatile int STOP = FALSE;
 
+int state = START;
+
+void stateMachine(int fd, unsigned char a)
+{
+
+    unsigned char byte = 0;
+
+    int bytes = 0;
+
+    bytes = read(fd, &byte, 1);
+
+    if (bytes > 0)
+    {
+        printf("%x\n", byte);
+        switch (state)
+        {
+        case START:
+            printf("START\n");
+            if (byte == FLAG)
+                state = FLAG_RCV;
+            break;
+        case FLAG_RCV:
+            printf("FLAG_RCV\n");
+            if (byte == A)
+                state = A_RCV;
+            else if (byte != FLAG)
+                state = START;
+            break;
+        case A_RCV:
+            printf("A_RCV\n");
+            if (byte == a)
+                state = C_RCV;
+            else if (byte == FLAG)
+                state = FLAG_RCV;
+            else
+                state = START;
+            break;
+        case C_RCV:
+            printf("C_RCV\n");
+            if (byte == BCC)
+                state = BCC_OK;
+            else if (byte == FLAG)
+                state = FLAG_RCV;
+            else
+                state = START;
+            break;
+        case BCC_OK:
+            printf("BCC_OK\n");
+            if (byte == FLAG)
+            {
+                printf("STOP\n");
+                STOP = TRUE;
+                state = START;
+                alarm(0);
+            }
+            else
+                state = START;
+            break;
+        }
+    }
+}
+
+int sendBuffer(int fd, unsigned char a){
+
+    // Create string to send
+    unsigned char buf[5];
+
+    buf[0] = FLAG;
+    buf[1] = A;
+    buf[2] = C;
+    buf[3] = BCC;
+    buf[4] = FLAG;
+
+    return write(fd, buf, sizeof(buf));
+}
+
+int ll_open(int fd){
+
+    // Save current port settings
+    if (tcgetattr(fd, &oldtio) == -1)
+    {
+        perror("tcgetattr");
+        exit(-1);
+    }
+
+    // Clear struct for new port settings
+    memset(&newtio, 0, sizeof(newtio));
+
+    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
+    newtio.c_iflag = IGNPAR;
+    newtio.c_oflag = 0;
+
+    // Set input mode (non-canonical, no echo,...)
+    newtio.c_lflag = 0;
+    newtio.c_cc[VTIME] = 0; // Inter-character timer unused
+    newtio.c_cc[VMIN] = 0;  // Blocking read until 5 chars received
+
+    // VTIME e VMIN should be changed in order to protect with a
+    // timeout the reception of the following character(s)
+
+    // Now clean the line and activate the settings for the port
+    // tcflush() discards data written to the object referred to
+    // by fd but not transmitted, or data received but not read,
+    // depending on the value of queue_selector:
+    //   TCIFLUSH - flushes data received but not read.
+    tcflush(fd, TCIOFLUSH);
+
+    // Set new port settings
+    if (tcsetattr(fd, TCSANOW, &newtio) == -1)
+    {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    printf("New termios structure set\n");
+
+    // In non-canonical mode, '\n' does not end the writing.
+    // Test this condition by placing a '\n' in the middle of the buffer.
+    // The whole buffer must be sent even with the '\n'.
+
+    // Set alarm function handler
+
+    int bytes = sendBuffer(fd, C);
+
+    printf("%d bytes written\n", bytes);
+
+    // Wait until all bytes have been written to the serial port
+    sleep(1);
+
+    bytes = 0;
+
+    while (STOP == FALSE && alarmCount < 4)
+    {
+        if (alarmEnabled == FALSE)
+        {
+            bytes = sendBuffer(fd, C);
+            alarm(3); // Set alarm to be triggered in 3s
+            alarmEnabled = TRUE;
+        }
+
+        stateMachine(fd, C_UA);
+        
+    }
+
+    // Restore the old port settings
+    if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
+    {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    close(fd);
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
+
     // Program usage: Uses either COM1 or COM2
     const char *serialPortName = argv[1];
 
@@ -51,140 +235,21 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    struct termios oldtio;
-    struct termios newtio;
+    (void)signal(SIGALRM, alarmHandler);
 
-    // Save current port settings
-    if (tcgetattr(fd, &oldtio) == -1)
+    while (STOP == FALSE && alarmCount < 4)
     {
-        perror("tcgetattr");
-        exit(-1);
+        if (!alarmEnabled)
+        {
+            printf("Resending SET frame...\n");
+            sendBuffer(fd, C);
+            alarm(3);
+            alarmEnabled = TRUE;
+        }
+
+        stateMachine(fd, C_UA); // Listen for UA response
     }
 
-    // Clear struct for new port settings
-    memset(&newtio, 0, sizeof(newtio));
-
-    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
-    newtio.c_iflag = IGNPAR;
-    newtio.c_oflag = 0;
-
-    // Set input mode (non-canonical, no echo,...)
-    newtio.c_lflag = 0;
-    newtio.c_cc[VTIME] = 0; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 5;  // Blocking read until 5 chars received
-
-    // VTIME e VMIN should be changed in order to protect with a
-    // timeout the reception of the following character(s)
-
-    // Now clean the line and activate the settings for the port
-    // tcflush() discards data written to the object referred to
-    // by fd but not transmitted, or data received but not read,
-    // depending on the value of queue_selector:
-    //   TCIFLUSH - flushes data received but not read.
-    tcflush(fd, TCIOFLUSH);
-
-    // Set new port settings
-    if (tcsetattr(fd, TCSANOW, &newtio) == -1)
-    {
-        perror("tcsetattr");
-        exit(-1);
-    }
-
-    printf("New termios structure set\n");
-
-    // ORIGINAL
-    /*
-    // Create string to send
-    unsigned char buf[BUF_SIZE] = {0};
-
-    for (int i = 0; i < BUF_SIZE; i++)
-    {
-        buf[i] = 'a' + i % 26;
-    }
-
-    // In non-canonical mode, '\n' does not end the writing.
-    // Test this condition by placing a '\n' in the middle of the buffer.
-    // The whole buffer must be sent even with the '\n'.
-    buf[5] = '\n';
-
-    int bytes = write(fd, buf, BUF_SIZE);
-    printf("%d bytes written\n", bytes);
-    */
-
-    // Create string to send
-    unsigned char buf[BUF_SIZE] = {0};
-    int bytes;
-    
-    unsigned char buf2[5] = {0};
-    buf2[0]=0x7E;//FLAG
-    buf2[1]=0x03;//a
-    buf2[2]=0x03;//C
-    buf2[3]=buf[1]^buf[2];
-    buf2[4]=buf[0];
-
-// envia o set
-  /*  for(int i=0;i<5;i++){
-    buf[0]=buf2[i];
-    bytes=write(fd, buf, BUF_SIZE);
-    printf("%x byte enviado\n", buf[0]);
-    }*/
-
-//ler ua
-unsigned char ua[BUF_SIZE]={0};
-bytes=read(fd,ua,BUF_SIZE);
-printf("UA=%x\n",ua[0]);
-
-
-//máquina estados para o alarme
-int state=0;
-while(state !=2){
-
-
-switch(state):
-case 0:
-   for(int i=0;i<5;i++){
-    buf[0]=buf2[i];
-    bytes=write(fd, buf, BUF_SIZE);
-    printf("%x byte enviado\n", buf[0]);
-    }
-state=1;
-break;
-
-case 1:
-//espera pelo ua, ou pelo cnt_alarme >3(vai para o 2), ou que passem 3 segundos(vai para o 0)
-if((buf[0]==0x03) ||  alarmCount>3  ){state=2;}
-else if(alarmEnabled){state=0;}
-break;
-
-
-
-case 2:
-//novo set aqui?
-break;
+    if (!ll_open(fd))
+        return -1;
 }
-
-
-
-
-  
- /*   bytes = read(fd, buf, BUF_SIZE);
-    for (int i = 0; i<BUF_SIZE; i++){
-        printf(":0x%x\n", buf[i]);
-    }*/
-
-
-    // Wait until all bytes have been written to the serial port
-    sleep(1);
-
-    // Restore the old port settings
-    if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
-    {
-        perror("tcsetattr");
-        exit(-1);
-    }
-
-    close(fd);
-
-    return 0;
-}
-
