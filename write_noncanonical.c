@@ -1,4 +1,3 @@
-// Write to serial port in non-canonical mode
 //
 // Modified by: Eduardo Nuno Almeida [enalmeida@fe.up.pt]
 
@@ -63,7 +62,16 @@ void stateMachine(int fd, unsigned char a)
     int bytes = 0;
 
     bytes = read(fd, &byte, 1);
-
+    
+    if (bytes == 0)
+    {
+    	printf("No data to received, reseting alarm... \n");
+	alarm(0);
+	alarmEnabled = FALSE;
+	return;
+    
+    
+    }
     if (bytes > 0)
     {
         printf("%x\n", byte);
@@ -73,6 +81,7 @@ void stateMachine(int fd, unsigned char a)
             printf("START\n");
             if (byte == FLAG)
                 state = FLAG_RCV;
+		
             break;
         case FLAG_RCV:
             printf("FLAG_RCV\n");
@@ -105,8 +114,10 @@ void stateMachine(int fd, unsigned char a)
             {
                 printf("STOP\n");
                 STOP = TRUE;
+		alarm(0);
+		alarmEnabled = FALSE;
                 state = START;
-                alarm(0);
+                
             }
             else
                 state = START;
@@ -246,10 +257,21 @@ int main(int argc, char *argv[])
             alarm(3);
             alarmEnabled = TRUE;
         }
-
+	
+	int prevState = state;
+	if(state == prevState){
+	
+	printf("No data received");
+	alarm(0);
+	alarmEnabled = FALSE;
+	
+	}
         stateMachine(fd, C_UA); // Listen for UA response
     }
 
     if (!ll_open(fd))
         return -1;
 }
+
+
+
