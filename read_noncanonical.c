@@ -1,7 +1,3 @@
-// Read from serial port in non-canonical mode
-//
-// Modified by: Eduardo Nuno Almeida [enalmeida@fe.up.pt]
-
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,13 +7,6 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include "alarm.h"
-
-
-//no write têm que se mudar o A e o C para 3
-
-
-
 // Baudrate settings are defined in <asm/termbits.h>, which is
 // included by <termios.h>
 #define BAUDRATE B38400
@@ -26,26 +15,21 @@
 #define FALSE 0
 #define TRUE 1
 
-#define FLAG    0x7E
-#define A       0x03
-#define C       0x03
-#define BCC     (A^C)
+#define BUF_SIZE 256
 
-#define BUF_SIZE 1
+// SET buffer values
+#define FLAG        0x7E
+#define A           0x03
+#define C           0x03
+#define C_UA        0x07
+#define BCC         (A^C)
 
-typedef enum State_Struct{
-    START,
-    FLAG_RCV,
-    A_RCV,
-    C_RCV,
-    BCC_OK,
-    stop,
-
-}State;// Passei a variavel state para 1 inteiro estava a dar erros com a enumeraçao e n sei fazer por esse metodo
-//int state;read_noncanonical
-
-State state=START;
-
+#define START       0
+#define FLAG_RCV    1
+#define A_RCV       2
+#define C_RCV       3
+#define BCC_OK      4
+#define S_STOP      5
 
 volatile int STOP = FALSE;
 
@@ -65,7 +49,7 @@ int main(int argc, char *argv[])
     }
 
     // Open serial port device for reading and writing and not as controlling tty
-    // because we don'tA want to get killed if linenoise sends CTRL-C.
+    // because we don't want to get killed if linenoise sends CTRL-C.
     int fd = open(serialPortName, O_RDWR | O_NOCTTY);
     if (fd < 0)
     {
@@ -86,19 +70,22 @@ int main(int argc, char *argv[])
     // Clear struct for new port settings
     memset(&newtio, 0, sizeof(newtio));
 
-    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
-    newtio.c_iflag = IGNPAR;
-    newtio.c_oflag = 0;
+    newtio.c_cflag      = BAUDRATE | CS8 | CLOCAL | CREAD;
+    newtio.c_iflag      = IGNPAR;
+    newtio.c_oflag      = 0;
 
     // Set input mode (non-canonical, no echo,...)
-    newtio.c_lflag = 0;
-    newtio.c_cc[VTIME] = 0; // Inter-c 0x03in order to protect with a
+    newtio.c_lflag      =   0;
+    newtio.c_cc[VTIME]  =   0; // Inter-character timer unused
+    newtio.c_cc[VMIN]   =   0;  // Blocking read until 5 chars received
+
+    // VTIME e VMIN should be changed in order to protect with a
     // timeout the reception of the following character(s)
 
     // Now clean the line and activate the settings for the port
     // tcflush() discards data written to the object referred to
     // by fd but not transmitted, or data received but not read,
-    // depending on the value of queue_ 0x03elector:
+    // depending on the value of queue_selector:
     //   TCIFLUSH - flushes data received but not read.
     tcflush(fd, TCIOFLUSH);
 
@@ -108,103 +95,88 @@ int main(int argc, char *argv[])
         perror("tcsetattr");
         exit(-1);
     }
- 0x03
+    //printf(fd);
+    //printf("\n");
+
     printf("New termios structure set\n");
 
     // Loop for input
-    unsigned char buf[BUF_SIZE + 1] = {0}; // +1: Save space for the final '\0' char
+    //unsigned char byte[5] = {0};
+    unsigned char byte = 0;
+    
+    int state = START;
 
-    /*while (STOP == FALSE)
+    int bytes = 0;
+    
+    while (STOP == FALSE)
     {
-        // Returns after 5 chars have been input
-        int bytes = read(fd, buf, BUF_SIZE);
-        buf[bytes] = '\0'; // Set end of string to '\0', so we can printf
 
-        printf(":%s:%d\n", buf, bytes);
-        if (buf[0] == 'z')
-            STOP = TRUE;
-    }*/
-    
-            
+        bytes = read(fd, &byte, 1);
         
-  int bytes;
-
-   while(state != BCC_OK){
-    bytes = read(fd, buf, BUF_SIZE);
-    printf("buf0 é:%x \n",buf[0]);
-    switch (state){
-
-    case START:  
-    printf("start\n");
-    if (buf[0] == FLAG){state = FLAG_RCV;}
-    else {state = START;} 0x03
-    case FLAG_RCV:
-    unsigned char buf1[1] = {A};
-    printf("numero de bytes enviados: %x\n", buf1[1]);// numero de bytes enviados no ua
-    write(fd, buf1, BUF_SIZE); 
-    printf("flag_rcv\n");
-    if (buf[0] == A){state = A_RCV;}
-    else if (buf[0] == FLAG){state  = FLAG_RCV;}
-    else {state = START;}
-    break;
- 0x03
-    case A_RCV:
-    printf("A_RCV\n");
-    if (buf[0] == C){state = C_RCV;}
-    else if (buf[0] == FLAG){state  = FLAG_RCV;}
-    else {state = START;}
-    break;
-
-
-    case C_RCV:
-    printf("BCC é: %x\n",BCC);
-    printf("C_RCV\n");
-    if (buf[0] == BCC){state = BCC_OK;}
-    else if (buf[0] == FLAG){state  = FLAG_RCV;}
-    else {state = START;}
-    break;
-
-    
-    case BCC_OK:
-    printf("BCC_OK\n");
-    if (buf[0] == FLAG){state = stop;}
-    else {state = START;}
-    break;
+       if(bytes >0){    
+        printf("%x\n", byte);
+        switch(state)
+            {
+                case START:
+                    printf("started\n");
+                    //printf("Start1");
+                    if(byte == FLAG){
+                        printf("FlagRCV\n");
+                        state = FLAG_RCV;
+               
+                    }
+                    break;
+                case FLAG_RCV:
+                    if (byte == A){
+                        state = A_RCV;
+                        printf("a_RCV\n");
+                    }
+                    else if(byte != FLAG)           
+                        state = START;
+                    break;
+                case A_RCV:
+                    if (byte == C){
+                        printf("C_RCV\n");
+                        state = C_RCV;
+                    }
+                    else if (byte == FLAG)
+                        state = FLAG_RCV;
+                    else
+                        state = START;
+                    break;
+                case C_RCV:
+                    if (byte == BCC){
+                        state = BCC_OK;
+                        printf("BCC\n");
+                    }
+                    else if (byte == FLAG)
+                        state = FLAG_RCV;
+                    else
+                        state = START;
+                    break;
+                case BCC_OK:
+                    if (byte == FLAG){
+                        STOP = TRUE;
+                        printf("STOP\n");                    
+                    }
+                    else
+                        state = START;
+                    break;
+            }
+        }
     }
-
-}
-
+    sleep(6);
     
-
-    //buf[bytes] = '\0'; // Set end of string to '\0', so we can printf
+    // Returns after 5 chars have been input
+    unsigned char buf[5];
+    buf[0] = FLAG;
+    buf[1] = A;
+    buf[2] = C_UA;
+    buf[3] = BCC;
+    buf[4] = FLAG;
+    bytes = write(fd, buf, sizeof(buf));
+    printf("%d bytes written\n", bytes);
     
-    for(int i=0; i<BUF_SIZE; i++){
-       printf(":0x00\n");
-       }
-
-    /*
-    switch (state){
-    case 0:
-    if (FLAG_RCV)   state = FLAG_RCV; 0x03
-    if(C_RCV) state=3;
-    if(Other_RCV) state=0;
-    if(FLAG_RCV) state=1;
-
-    case 3:
-    printf();
-    if(A^C=BCC) state=4;
-    if(Other_RCV) state=0;
-    if(FLAG_RCV) state=1;
-
- 0x03
-    }*/
-
-   /* buf[0]=0x7E;
-    buf[1]=0x01;
-    buf[2]=0x07;
-    buf[3]=buf[1]^buf[2];
-    buf[4]=buf[0];*/
- 0x03
 
     // The while() cycle should be changed in order to respect the specifications
     // of the protocol indicated in the Lab guide
@@ -220,4 +192,3 @@ int main(int argc, char *argv[])
 
     return 0;
 }
-
