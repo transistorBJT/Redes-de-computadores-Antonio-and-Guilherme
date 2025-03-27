@@ -1,0 +1,2 @@
+gcc read.c link.c app.c -o runRead
+gcc write.c link.c app.c -o runWrite
