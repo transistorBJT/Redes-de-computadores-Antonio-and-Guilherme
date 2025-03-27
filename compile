@@ -1,2 +1,0 @@
-gcc read.c link.c -o runRead
-gcc write.c link.c -o runWrite
